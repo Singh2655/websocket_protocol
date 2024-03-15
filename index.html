@@ -10,10 +10,25 @@
     <script>
         const message=document.getElementById("message")
         const socket=new WebSocket('ws://localhost:8080')
-        socket.onopen=event=>console.log("connection is opened")
+        socket.onopen=event=>{
+            console.log("connection is opened")
+            const id=Math.round(Math.random()*100)
+            console.log("sending ...",id)
+            const data=JSON.stringify({
+                id,
+                name:`[${id}]Shaurya`,
+                address:{
+                    street:'new street',
+                    number:id*2,
+                },
+                profession:'developer'
+            })
+            socket.send(data)
+        }
         socket.onclose=event=>console.log("connection is closed")
         socket.onerror=err=>console.error(`web socket error: ${error}`)
         socket.onmessage=msg=>console.log(`message recieved: ${msg.data}`)
+
     </script>
 </body>
 </html>
