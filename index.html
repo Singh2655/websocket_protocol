@@ -14,7 +14,8 @@
             console.log("connection is opened")
             const id=Math.round(Math.random()*100)
             console.log("sending ...",id)
-            const data=JSON.stringify({
+            const data=JSON.stringify([
+                {
                 id,
                 name:`[${id}]Shaurya`,
                 address:{
@@ -22,7 +23,26 @@
                     number:id*2,
                 },
                 profession:'developer'
-            })
+            },
+                {
+                id,
+                name:`[${id}]Sean`,
+                address:{
+                    street:'new street',
+                    number:id*4,
+                },
+                profession:'junior developer'
+            },
+                {
+                id,
+                name:`[${id}]Shoto`,
+                address:{
+                    street:'old street',
+                    number:id*4,
+                },
+                profession:'backend developer'
+            },
+        ])
             socket.send(data)
         }
         socket.onclose=event=>console.log("connection is closed")

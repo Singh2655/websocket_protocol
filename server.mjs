@@ -7,10 +7,12 @@ const SEVEN_BIT_INTEGET_MARKER = 125;
 const SIXTEEN_BIT_INTEGET_MARKER = 126;
 const SIXTYFOUR_BIT_INTEGET_MARKER = 127;
 
+const MAXIMUM_SIXTEENBITS_INTEGER = 2 ** 16;
+
 const MASK_KEY_BYTES_LENGTH = 4;
 
 const FIRST_BIT = 128;
-const OPCODE_TEXT=0x01
+const OPCODE_TEXT = 0x01;
 
 const server = createServer((req, res) => {
   res.writeHead(200);
@@ -27,37 +29,44 @@ function onSocketUpgrade(req, socket, head) {
   socket.on("readable", () => onSocketReadable(socket));
 }
 
-function sendMessage(message,socket){
-    const dataFrameBuffer=prepareMessage(message)
-    socket.write(dataFrameBuffer)
+function sendMessage(message, socket) {
+  const dataFrameBuffer = prepareMessage(message);
+  socket.write(dataFrameBuffer);
 }
 
-function prepareMessage(message){
-    const msg=Buffer.from(message)
-    const msgSize=msg.length
-    let dataFrameBuffer
-    const offset=2
-    const firstByte=0x80|OPCODE_TEXT
+function prepareMessage(message) {
+  const msg = Buffer.from(message);
+  const msgSize = msg.length;
+  let dataFrameBuffer;
 
-    if(msgSize<=SEVEN_BIT_INTEGET_MARKER){
-        const bytes=[firstByte]
-        dataFrameBuffer=Buffer.from(bytes.concat(msgSize))
-    }else {
-        throw new Error('message too long!!')
-    }
-    const toatalLength=dataFrameBuffer.byteLength+msgSize
-    const dataFrameResponse=concat([dataFrameBuffer,msg],toatalLength)
-    return dataFrameResponse
+  const firstByte = 0x80 | OPCODE_TEXT;
+
+  if (msgSize <= SEVEN_BIT_INTEGET_MARKER) {
+    const bytes = [firstByte];
+    dataFrameBuffer = Buffer.from(bytes.concat(msgSize));
+  } else if (msgSize <= MAXIMUM_SIXTEENBITS_INTEGER) {
+    const offsetFourBytes = 4;
+    const target = Buffer.allocUnsafe(offsetFourBytes);
+    target[0]=firstByte
+    target[1]=SIXTEEN_BIT_INTEGET_MARKER|0x0
+    target.writeUInt16BE(msgSize,2)
+    dataFrameBuffer=target
+  } else {
+    throw new Error("message too long!!");
+  }
+  const toatalLength = dataFrameBuffer.byteLength + msgSize;
+  const dataFrameResponse = concat([dataFrameBuffer, msg], toatalLength);
+  return dataFrameResponse;
 }
 
-function concat(bufferList,toatalLength){
-    const target=Buffer.allocUnsafe(toatalLength)
-    let offset=0
-    for(const buffer of bufferList){
-        target.set(buffer,offset)
-        offset+=buffer.length
-    }
-    return target
+function concat(bufferList, toatalLength) {
+  const target = Buffer.allocUnsafe(toatalLength);
+  let offset = 0;
+  for (const buffer of bufferList) {
+    target.set(buffer, offset);
+    offset += buffer.length;
+  }
+  return target;
 }
 function onSocketReadable(socket) {
   socket.read(1);
@@ -65,46 +74,50 @@ function onSocketReadable(socket) {
   const lengthIndicatorInBits = markerAndPayloadLength - FIRST_BIT;
 
   let messageLength = 0;
-  if (messageLength <= SEVEN_BIT_INTEGET_MARKER) {
+  if (lengthIndicatorInBits <= SEVEN_BIT_INTEGET_MARKER) {
     messageLength = lengthIndicatorInBits;
+  } else if (lengthIndicatorInBits <= SIXTEEN_BIT_INTEGET_MARKER) {
+    // big-endian 16-bit integer
+    messageLength = socket.read(2).readUint16BE(0);
   } else {
     throw new Error(
       "your message is too long!! we don't handle 64bit messages"
     );
   }
-  const maskKey=socket.read(MASK_KEY_BYTES_LENGTH)
-  const encoded=socket.read(messageLength)
-  const decoded=unMask(encoded,maskKey)
-  const recieved=decoded.toString('utf8')
-  const data=JSON.parse(recieved)
-  console.log(`message recieved: ${data}`)
+  const maskKey = socket.read(MASK_KEY_BYTES_LENGTH);
+  const encoded = socket.read(messageLength);
+  const decoded = unMask(encoded, maskKey);
+  const recieved = decoded.toString("utf8");
+  const data = JSON.parse(recieved);
+  console.log(`message recieved: ${data}`);
 
-  const msg=JSON.stringify({
-    message:data
-  })
-  sendMessage(msg,socket)
+  const msg = JSON.stringify({
+    message: data,
+    at: new Date().toISOString(),
+  });
+  sendMessage(msg, socket);
 }
 
+function unMask(encodedBuffer, maskKey) {
+  const finalBUffer = Buffer.from(encodedBuffer);
 
+  const fillWithEightZeros = (t) => t.padStart(8, "0");
+  const toBinary = (t) => fillWithEightZeros(t.toString(2));
+  const fromBinaryToDecimal = (t) => parseInt(toBinary(t), 2);
+  const getCharFromBinary = (t) => String.fromCharCode(fromBinaryToDecimal(t));
 
-function unMask(encodedBuffer,maskKey){
-    const finalBUffer=Buffer.from(encodedBuffer)
+  for (let i = 0; i < encodedBuffer.length; i++) {
+    finalBUffer[i] = encodedBuffer[i] ^ maskKey[i % MASK_KEY_BYTES_LENGTH];
 
-    const fillWithEightZeros=t=>t.padStart(8,'0')
-    const toBinary=(t)=>fillWithEightZeros(t.toString(2))
-    const fromBinaryToDecimal=(t)=>parseInt(toBinary(t),2)
-    const getCharFromBinary=(t)=>String.fromCharCode(fromBinaryToDecimal(t))
-
-    for(let i=0;i<encodedBuffer.length;i++){
-        finalBUffer[i]=encodedBuffer[i]^maskKey[i%MASK_KEY_BYTES_LENGTH]
-
-        const logger={
-            unMaskCalc:`${toBinary(encodedBuffer[i])} ^ ${toBinary(maskKey[i%MASK_KEY_BYTES_LENGTH])}=${toBinary(finalBUffer[i])}`,
-            decoded:getCharFromBinary(finalBUffer[i])
-        }
-        console.log(logger)
-    }
-    return finalBUffer
+    const logger = {
+      unMaskCalc: `${toBinary(encodedBuffer[i])} ^ ${toBinary(
+        maskKey[i % MASK_KEY_BYTES_LENGTH]
+      )}=${toBinary(finalBUffer[i])}`,
+      decoded: getCharFromBinary(finalBUffer[i]),
+    };
+    console.log(logger);
+  }
+  return finalBUffer;
 }
 
 function prepareHandshakeHeader(id) {
@@ -117,7 +130,7 @@ function prepareHandshakeHeader(id) {
     "",
   ]
     .map((line) => line.concat("\r\n"))
-    .join('');
+    .join("");
   return headers;
 }
 
